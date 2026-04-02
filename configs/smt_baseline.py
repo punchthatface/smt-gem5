@@ -2,6 +2,8 @@ from m5.objects import *
 import m5
 
 system = System()
+system.multi_thread = True
+
 system.clk_domain = SrcClockDomain()
 system.clk_domain.clock = "2GHz"
 system.clk_domain.voltage_domain = VoltageDomain()
@@ -15,9 +17,7 @@ system.membus = SystemXBar()
 system.system_port = system.membus.cpu_side_ports
 
 system.cpu.createInterruptController()
-
-system.cpu.icache_port = system.membus.cpu_side_ports
-system.cpu.dcache_port = system.membus.cpu_side_ports
+system.cpu.connectBus(system.membus)
 
 system.mem_ctrl = MemCtrl()
 system.mem_ctrl.dram = DDR3_1600_8x8()
@@ -25,11 +25,12 @@ system.mem_ctrl.dram.range = system.mem_ranges[0]
 system.mem_ctrl.port = system.membus.mem_side_ports
 
 binary = "/bin/echo"
+system.workload = SEWorkload.init_compatible(binary)
 
-p1 = Process()
+p1 = Process(pid=100)
 p1.cmd = [binary, "thread0"]
 
-p2 = Process()
+p2 = Process(pid=101)
 p2.cmd = [binary, "thread1"]
 
 system.cpu.workload = [p1, p2]
