@@ -1,14 +1,12 @@
-# gem5 build junk
+# gem5 source / build
+gem5/
 build/
 *.opt
 *.out
 
-# gem5 source (local clone)
-gem5/
-
-# results (keep folder, ignore contents)
-results/*
-!results/.keep
+# generated outputs
+results/
+workloads/bin/
 
 # python cache
 __pycache__/
