@@ -1,0 +1,44 @@
+{
+  "gem5_root": "/users/akim2/gem5",
+  "gem5_bin": "/users/akim2/gem5/build/X86/gem5.opt",
+  "se_script": "",
+  "results_root": "/users/akim2/smt-gem5/results/phase1_runs",
+  "no_smt_mode": "sequential_single_core",
+  "common_args": [
+    "--cpu-type=DerivO3CPU",
+    "--caches",
+    "--l2cache",
+    "--mem-size=2GB",
+    "--cpu-clock=2GHz",
+    "--sys-clock=2GHz"
+  ],
+  "workloads": {
+    "compute_small": {
+      "cmd": "/users/akim2/smt-gem5/workloads/bin/compute_loop",
+      "options": "50000000",
+      "domain": "A"
+    },
+    "compute_big": {
+      "cmd": "/users/akim2/smt-gem5/workloads/bin/compute_loop",
+      "options": "120000000",
+      "domain": "A"
+    },
+    "memory_small": {
+      "cmd": "/users/akim2/smt-gem5/workloads/bin/memory_loop",
+      "options": "5000000 16777216",
+      "domain": "B"
+    }
+  },
+  "pairs": [
+    {
+      "name": "A_vs_A",
+      "w1": "compute_small",
+      "w2": "compute_big"
+    },
+    {
+      "name": "A_vs_B",
+      "w1": "compute_small",
+      "w2": "memory_small"
+    }
+  ]
+}
