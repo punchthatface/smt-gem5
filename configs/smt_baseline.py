@@ -3,10 +3,12 @@ import m5
 import argparse
 import shlex
 
+
 def split_opts(s):
     if not s:
         return []
     return shlex.split(s)
+
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--threads", type=int, default=2, choices=[1, 2])
@@ -16,6 +18,7 @@ parser.add_argument("--cmd2", default="")
 parser.add_argument("--opts2", default="")
 parser.add_argument("--mem-size", default="512MB")
 parser.add_argument("--cpu-clock", default="2GHz")
+parser.add_argument("--max-ticks", type=int, default=0)
 args = parser.parse_args()
 
 system = System()
@@ -66,6 +69,12 @@ print(f"threads={args.threads}")
 print(f"cmd1={p1.cmd}")
 if args.threads == 2:
     print(f"cmd2={p2.cmd}")
+if args.max_ticks > 0:
+    print(f"max_ticks={args.max_ticks}")
 
-exit_event = m5.simulate()
+if args.max_ticks > 0:
+    exit_event = m5.simulate(args.max_ticks)
+else:
+    exit_event = m5.simulate()
+
 print(f"Exiting at tick {m5.curTick()} because {exit_event.getCause()}")
