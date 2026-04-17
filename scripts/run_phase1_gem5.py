@@ -14,16 +14,18 @@ Policies:
 import argparse
 import csv
 import json
-import os
 import re
 import shlex
 import subprocess
 from pathlib import Path
+import time
 
 STAT_RE = re.compile(r"^(\S+)\s+([-+0-9.eE]+)")
 
+
 def ensure_dir(p: Path) -> None:
     p.mkdir(parents=True, exist_ok=True)
+
 
 def parse_stats(stats_path: Path):
     stats = {}
@@ -39,6 +41,7 @@ def parse_stats(stats_path: Path):
                 pass
     return stats
 
+
 def summarize(stats):
     insts = stats.get("simInsts", 0.0)
     secs = stats.get("simSeconds", 0.0)
@@ -49,12 +52,39 @@ def summarize(stats):
         "throughput_inst_per_simsec": (insts / secs) if secs else 0.0,
     }
 
-def run_cmd(cmd, cwd):
-    print("\n[RUN]", " ".join(shlex.quote(x) for x in cmd))
-    return subprocess.run(cmd, cwd=str(cwd), capture_output=True, text=True)
+
+class ProgressTracker:
+    def __init__(self, total_runs: int):
+        self.total_runs = total_runs
+        self.completed = 0
+
+    def before_run(self, label: str) -> None:
+        current = self.completed + 1
+        pct = (current / self.total_runs) * 100 if self.total_runs else 100.0
+        print(f"\n[PROGRESS] [{current}/{self.total_runs} | {pct:5.1f}%] {label}")
+
+    def after_run(self) -> None:
+        self.completed += 1
+
+
+def run_cmd(cmd, cwd: Path, progress: ProgressTracker, label: str):
+    progress.before_run(label)
+
+    print("[RUN]", " ".join(shlex.quote(x) for x in cmd))
+
+    start = time.time()
+    proc = subprocess.run(cmd, cwd=str(cwd), capture_output=True, text=True)
+    end = time.time()
+
+    elapsed = end - start
+    print(f"[TIME] {label} took {elapsed:.2f} seconds")
+
+    progress.after_run()
+    return proc
+
 
 def build_base(cfg, outdir):
-    return [
+    cmd = [
         cfg["gem5_bin"],
         "--outdir=" + str(outdir),
         cfg["config_script"],
@@ -62,14 +92,20 @@ def build_base(cfg, outdir):
         "--cpu-clock", cfg.get("cpu_clock", "2GHz"),
     ]
 
-def run_single(cfg, workload, outdir):
+    if int(cfg.get("max_ticks", 0)) > 0:
+        cmd += ["--max-ticks", str(cfg["max_ticks"])]
+
+    return cmd
+
+
+def run_single(cfg, workload, outdir, progress: ProgressTracker, label: str):
     ensure_dir(outdir)
     cmd = build_base(cfg, outdir) + [
         "--threads", "1",
         "--cmd1", workload["cmd"],
         "--opts1", workload.get("options", ""),
     ]
-    proc = run_cmd(cmd, Path(cfg["repo_root"]))
+    proc = run_cmd(cmd, Path(cfg["repo_root"]), progress, label)
     res = {
         "returncode": proc.returncode,
         "stdout": proc.stdout,
@@ -83,7 +119,8 @@ def run_single(cfg, workload, outdir):
         res.update(summarize(parse_stats(sp)))
     return res
 
-def run_pair_smt(cfg, w1, w2, outdir):
+
+def run_pair_smt(cfg, w1, w2, outdir, progress: ProgressTracker, label: str):
     ensure_dir(outdir)
     cmd = build_base(cfg, outdir) + [
         "--threads", "2",
@@ -92,7 +129,7 @@ def run_pair_smt(cfg, w1, w2, outdir):
         "--cmd2", w2["cmd"],
         "--opts2", w2.get("options", ""),
     ]
-    proc = run_cmd(cmd, Path(cfg["repo_root"]))
+    proc = run_cmd(cmd, Path(cfg["repo_root"]), progress, label)
     res = {
         "returncode": proc.returncode,
         "stdout": proc.stdout,
@@ -105,6 +142,7 @@ def run_pair_smt(cfg, w1, w2, outdir):
     if sp.exists():
         res.update(summarize(parse_stats(sp)))
     return res
+
 
 def combine_no_smt(r1, r2):
     insts = r1.get("simInsts", 0.0) + r2.get("simInsts", 0.0)
@@ -116,6 +154,30 @@ def combine_no_smt(r1, r2):
         "hostSeconds": host,
         "throughput_inst_per_simsec": (insts / secs) if secs else 0.0,
     }
+
+
+def count_total_runs(cfg) -> int:
+    total = 0
+    workloads = cfg["workloads"]
+    for pair in cfg["pairs"]:
+        w1 = workloads[pair["w1"]]
+        w2 = workloads[pair["w2"]]
+
+        # unrestricted_smt
+        total += 1
+
+        # no_smt => two solo runs
+        total += 2
+
+        # constrained_smt
+        if w1["domain"] == w2["domain"]:
+            total += 1
+        else:
+            # cross-domain constrained reuses no_smt results; no extra gem5 run
+            total += 0
+
+    return total
+
 
 def main():
     ap = argparse.ArgumentParser()
@@ -129,6 +191,10 @@ def main():
 
     results_root = Path(cfg["results_root"]).resolve()
     ensure_dir(results_root)
+
+    total_runs = count_total_runs(cfg)
+    progress = ProgressTracker(total_runs)
+    print(f"[INFO] Total gem5 launches planned: {total_runs}")
 
     fieldnames = [
         "pair_name", "policy", "effective_policy",
@@ -148,7 +214,10 @@ def main():
 
         # unrestricted SMT
         outdir = results_root / name / "unrestricted_smt"
-        r = run_pair_smt(cfg, w1, w2, outdir)
+        r = run_pair_smt(
+            cfg, w1, w2, outdir, progress,
+            f"{name} :: unrestricted_smt"
+        )
         rows.append({
             "pair_name": name,
             "policy": "unrestricted_smt",
@@ -170,8 +239,14 @@ def main():
         # no SMT
         solo1 = results_root / name / "no_smt" / "solo1"
         solo2 = results_root / name / "no_smt" / "solo2"
-        r1 = run_single(cfg, w1, solo1)
-        r2 = run_single(cfg, w2, solo2)
+        r1 = run_single(
+            cfg, w1, solo1, progress,
+            f"{name} :: no_smt :: solo1 ({pair['w1']})"
+        )
+        r2 = run_single(
+            cfg, w2, solo2, progress,
+            f"{name} :: no_smt :: solo2 ({pair['w2']})"
+        )
         combo = combine_no_smt(r1, r2)
         rc = 0 if r1.get("returncode", 1) == 0 and r2.get("returncode", 1) == 0 else 1
         rows.append({
@@ -195,7 +270,10 @@ def main():
         # constrained SMT (quick model)
         if d1 == d2:
             outdir = results_root / name / "constrained_smt"
-            r = run_pair_smt(cfg, w1, w2, outdir)
+            r = run_pair_smt(
+                cfg, w1, w2, outdir, progress,
+                f"{name} :: constrained_smt"
+            )
             rows.append({
                 "pair_name": name,
                 "policy": "constrained_smt",
@@ -237,7 +315,9 @@ def main():
         writer.writeheader()
         writer.writerows(rows)
 
-    print(f"\nWrote {len(rows)} rows to {output_csv}")
+    print(f"\n[INFO] Completed {progress.completed}/{progress.total_runs} gem5 launches.")
+    print(f"Wrote {len(rows)} rows to {output_csv}")
+
 
 if __name__ == "__main__":
     main()
