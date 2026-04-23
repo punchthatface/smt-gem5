@@ -1,16 +1,4 @@
 #!/usr/bin/env python3
-"""
-Phase-1 gem5 driver that uses the project's custom configs/smt_baseline.py
-instead of gem5's deprecated se.py flow.
-
-Policies:
-- unrestricted_smt: run two workloads together on one SMT-enabled core
-- no_smt: run each workload alone on one non-SMT core, then aggregate
-- constrained_smt:
-    * same-domain -> same as unrestricted SMT
-    * cross-domain -> same as no-SMT (quick baseline model)
-"""
-
 import argparse
 import csv
 import json
@@ -22,29 +10,25 @@ import time
 
 STAT_RE = re.compile(r"^(\S+)\s+([-+0-9.eE]+)")
 
-
-def ensure_dir(p: Path) -> None:
+def ensure_dir(p):
     p.mkdir(parents=True, exist_ok=True)
 
-
-def parse_stats(stats_path: Path):
+def parse_stats(stats_path):
     stats = {}
     with open(stats_path, "r", encoding="utf-8", errors="ignore") as f:
         for line in f:
             m = STAT_RE.match(line.strip())
             if not m:
                 continue
-            key, value = m.group(1), m.group(2)
             try:
-                stats[key] = float(value)
+                stats[m.group(1)] = float(m.group(2))
             except ValueError:
                 pass
     return stats
 
-
 def summarize(stats):
     insts = stats.get("simInsts", 0.0)
-    secs = stats.get("simSeconds", 0.0)
+    secs  = stats.get("simSeconds", 0.0)
     return {
         "simInsts": insts,
         "simSeconds": secs,
@@ -52,132 +36,40 @@ def summarize(stats):
         "throughput_inst_per_simsec": (insts / secs) if secs else 0.0,
     }
 
-
-class ProgressTracker:
-    def __init__(self, total_runs: int):
-        self.total_runs = total_runs
-        self.completed = 0
-
-    def before_run(self, label: str) -> None:
-        current = self.completed + 1
-        pct = (current / self.total_runs) * 100 if self.total_runs else 100.0
-        print(f"\n[PROGRESS] [{current}/{self.total_runs} | {pct:5.1f}%] {label}")
-
-    def after_run(self) -> None:
-        self.completed += 1
-
-
-def run_cmd(cmd, cwd: Path, progress: ProgressTracker, label: str):
-    progress.before_run(label)
-
-    print("[RUN]", " ".join(shlex.quote(x) for x in cmd))
-
-    start = time.time()
-    proc = subprocess.run(cmd, cwd=str(cwd), capture_output=True, text=True)
-    end = time.time()
-
-    elapsed = end - start
-    print(f"[TIME] {label} took {elapsed:.2f} seconds")
-
-    progress.after_run()
-    return proc
-
-
-def build_base(cfg, outdir):
+def run_gem5(cfg, policy, w1, w2, outdir, label):
+    ensure_dir(outdir)
     cmd = [
         cfg["gem5_bin"],
         "--outdir=" + str(outdir),
         cfg["config_script"],
-        "--mem-size", cfg.get("mem_size", "512MB"),
-        "--cpu-clock", cfg.get("cpu_clock", "2GHz"),
-    ]
-
-    if int(cfg.get("max_ticks", 0)) > 0:
-        cmd += ["--max-ticks", str(cfg["max_ticks"])]
-
-    return cmd
-
-
-def run_single(cfg, workload, outdir, progress: ProgressTracker, label: str):
-    ensure_dir(outdir)
-    cmd = build_base(cfg, outdir) + [
-        "--threads", "1",
-        "--cmd1", workload["cmd"],
-        "--opts1", workload.get("options", ""),
-    ]
-    proc = run_cmd(cmd, Path(cfg["repo_root"]), progress, label)
-    res = {
-        "returncode": proc.returncode,
-        "stdout": proc.stdout,
-        "stderr": proc.stderr,
-        "run_cmd": " ".join(shlex.quote(x) for x in cmd),
-        "stats_path": str(outdir / "stats.txt"),
-        "config_path": str(outdir / "config.ini"),
-    }
-    sp = outdir / "stats.txt"
-    if sp.exists():
-        res.update(summarize(parse_stats(sp)))
-    return res
-
-
-def run_pair_smt(cfg, w1, w2, outdir, progress: ProgressTracker, label: str):
-    ensure_dir(outdir)
-    cmd = build_base(cfg, outdir) + [
-        "--threads", "2",
+        "--policy", policy,
         "--cmd1", w1["cmd"],
         "--opts1", w1.get("options", ""),
         "--cmd2", w2["cmd"],
         "--opts2", w2.get("options", ""),
+        "--num-cores", str(cfg.get("num_cores", 4)),
+        "--mem-size", cfg.get("mem_size", "512MB"),
+        "--cpu-clock", cfg.get("cpu_clock", "2GHz"),
     ]
-    proc = run_cmd(cmd, Path(cfg["repo_root"]), progress, label)
+    if int(cfg.get("max_ticks", 0)) > 0:
+        cmd += ["--max-ticks", str(cfg["max_ticks"])]
+
+    print(f"\n[RUN] {label}")
+    print(" ".join(shlex.quote(x) for x in cmd))
+    start = time.time()
+    proc = subprocess.run(cmd, cwd=cfg["repo_root"], capture_output=True, text=True)
+    elapsed = time.time() - start
+    print(f"[TIME] {elapsed:.2f}s  returncode={proc.returncode}")
+
     res = {
         "returncode": proc.returncode,
-        "stdout": proc.stdout,
-        "stderr": proc.stderr,
         "run_cmd": " ".join(shlex.quote(x) for x in cmd),
         "stats_path": str(outdir / "stats.txt"),
-        "config_path": str(outdir / "config.ini"),
     }
     sp = outdir / "stats.txt"
     if sp.exists():
         res.update(summarize(parse_stats(sp)))
     return res
-
-
-def combine_no_smt(r1, r2):
-    insts = r1.get("simInsts", 0.0) + r2.get("simInsts", 0.0)
-    secs = r1.get("simSeconds", 0.0) + r2.get("simSeconds", 0.0)
-    host = r1.get("hostSeconds", 0.0) + r2.get("hostSeconds", 0.0)
-    return {
-        "simInsts": insts,
-        "simSeconds": secs,
-        "hostSeconds": host,
-        "throughput_inst_per_simsec": (insts / secs) if secs else 0.0,
-    }
-
-
-def count_total_runs(cfg) -> int:
-    total = 0
-    workloads = cfg["workloads"]
-    for pair in cfg["pairs"]:
-        w1 = workloads[pair["w1"]]
-        w2 = workloads[pair["w2"]]
-
-        # unrestricted_smt
-        total += 1
-
-        # no_smt => two solo runs
-        total += 2
-
-        # constrained_smt
-        if w1["domain"] == w2["domain"]:
-            total += 1
-        else:
-            # cross-domain constrained reuses no_smt results; no extra gem5 run
-            total += 0
-
-    return total
-
 
 def main():
     ap = argparse.ArgumentParser()
@@ -188,96 +80,29 @@ def main():
     cfg = json.loads(Path(args.config).read_text())
     output_csv = Path(args.output_csv).resolve()
     ensure_dir(output_csv.parent)
-
     results_root = Path(cfg["results_root"]).resolve()
     ensure_dir(results_root)
 
-    total_runs = count_total_runs(cfg)
-    progress = ProgressTracker(total_runs)
-    print(f"[INFO] Total gem5 launches planned: {total_runs}")
-
+    workloads = cfg["workloads"]
     fieldnames = [
-        "pair_name", "policy", "effective_policy",
-        "w1", "w2", "domain1", "domain2",
+        "pair_name", "policy", "w1", "w2", "domain1", "domain2",
         "returncode", "simInsts", "simSeconds", "hostSeconds",
-        "throughput_inst_per_simsec", "outdir", "stats_path",
-        "config_path", "run_cmd", "notes"
+        "throughput_inst_per_simsec", "stats_path", "run_cmd"
     ]
     rows = []
 
-    workloads = cfg["workloads"]
     for pair in cfg["pairs"]:
         name = pair["name"]
         w1 = workloads[pair["w1"]]
         w2 = workloads[pair["w2"]]
         d1, d2 = w1["domain"], w2["domain"]
 
-        # unrestricted SMT
-        outdir = results_root / name / "unrestricted_smt"
-        r = run_pair_smt(
-            cfg, w1, w2, outdir, progress,
-            f"{name} :: unrestricted_smt"
-        )
-        rows.append({
-            "pair_name": name,
-            "policy": "unrestricted_smt",
-            "effective_policy": "unrestricted_smt",
-            "w1": pair["w1"], "w2": pair["w2"],
-            "domain1": d1, "domain2": d2,
-            "returncode": r.get("returncode", -1),
-            "simInsts": r.get("simInsts", ""),
-            "simSeconds": r.get("simSeconds", ""),
-            "hostSeconds": r.get("hostSeconds", ""),
-            "throughput_inst_per_simsec": r.get("throughput_inst_per_simsec", ""),
-            "outdir": str(outdir),
-            "stats_path": r.get("stats_path", ""),
-            "config_path": r.get("config_path", ""),
-            "run_cmd": r.get("run_cmd", ""),
-            "notes": "",
-        })
-
-        # no SMT
-        solo1 = results_root / name / "no_smt" / "solo1"
-        solo2 = results_root / name / "no_smt" / "solo2"
-        r1 = run_single(
-            cfg, w1, solo1, progress,
-            f"{name} :: no_smt :: solo1 ({pair['w1']})"
-        )
-        r2 = run_single(
-            cfg, w2, solo2, progress,
-            f"{name} :: no_smt :: solo2 ({pair['w2']})"
-        )
-        combo = combine_no_smt(r1, r2)
-        rc = 0 if r1.get("returncode", 1) == 0 and r2.get("returncode", 1) == 0 else 1
-        rows.append({
-            "pair_name": name,
-            "policy": "no_smt",
-            "effective_policy": "sequential_single_core",
-            "w1": pair["w1"], "w2": pair["w2"],
-            "domain1": d1, "domain2": d2,
-            "returncode": rc,
-            "simInsts": combo.get("simInsts", ""),
-            "simSeconds": combo.get("simSeconds", ""),
-            "hostSeconds": combo.get("hostSeconds", ""),
-            "throughput_inst_per_simsec": combo.get("throughput_inst_per_simsec", ""),
-            "outdir": str(results_root / name / "no_smt"),
-            "stats_path": f"{r1.get('stats_path','')} | {r2.get('stats_path','')}",
-            "config_path": f"{r1.get('config_path','')} | {r2.get('config_path','')}",
-            "run_cmd": f"{r1.get('run_cmd','')} || {r2.get('run_cmd','')}",
-            "notes": "aggregated from two solo runs",
-        })
-
-        # constrained SMT (quick model)
-        if d1 == d2:
-            outdir = results_root / name / "constrained_smt"
-            r = run_pair_smt(
-                cfg, w1, w2, outdir, progress,
-                f"{name} :: constrained_smt"
-            )
+        for policy in ["no_smt", "unrestricted_smt", "constrained_smt"]:
+            outdir = results_root / name / policy
+            r = run_gem5(cfg, policy, w1, w2, outdir, f"{name} :: {policy}")
             rows.append({
                 "pair_name": name,
-                "policy": "constrained_smt",
-                "effective_policy": "same_domain_pair_on_smt",
+                "policy": policy,
                 "w1": pair["w1"], "w2": pair["w2"],
                 "domain1": d1, "domain2": d2,
                 "returncode": r.get("returncode", -1),
@@ -285,29 +110,8 @@ def main():
                 "simSeconds": r.get("simSeconds", ""),
                 "hostSeconds": r.get("hostSeconds", ""),
                 "throughput_inst_per_simsec": r.get("throughput_inst_per_simsec", ""),
-                "outdir": str(outdir),
                 "stats_path": r.get("stats_path", ""),
-                "config_path": r.get("config_path", ""),
                 "run_cmd": r.get("run_cmd", ""),
-                "notes": "",
-            })
-        else:
-            rows.append({
-                "pair_name": name,
-                "policy": "constrained_smt",
-                "effective_policy": "cross_domain_fell_back_to_no_smt",
-                "w1": pair["w1"], "w2": pair["w2"],
-                "domain1": d1, "domain2": d2,
-                "returncode": rc,
-                "simInsts": combo.get("simInsts", ""),
-                "simSeconds": combo.get("simSeconds", ""),
-                "hostSeconds": combo.get("hostSeconds", ""),
-                "throughput_inst_per_simsec": combo.get("throughput_inst_per_simsec", ""),
-                "outdir": str(results_root / name / "constrained_smt"),
-                "stats_path": f"{r1.get('stats_path','')} | {r2.get('stats_path','')}",
-                "config_path": f"{r1.get('config_path','')} | {r2.get('config_path','')}",
-                "run_cmd": f"{r1.get('run_cmd','')} || {r2.get('run_cmd','')}",
-                "notes": "quick constrained model: cross-domain pair cannot co-run",
             })
 
     with open(output_csv, "w", newline="", encoding="utf-8") as f:
@@ -315,9 +119,7 @@ def main():
         writer.writeheader()
         writer.writerows(rows)
 
-    print(f"\n[INFO] Completed {progress.completed}/{progress.total_runs} gem5 launches.")
-    print(f"Wrote {len(rows)} rows to {output_csv}")
-
+    print(f"\n[DONE] Wrote {len(rows)} rows to {output_csv}")
 
 if __name__ == "__main__":
     main()
