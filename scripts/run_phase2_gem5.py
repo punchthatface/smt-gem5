@@ -63,7 +63,13 @@ def run_gem5(cfg, policy, w1, w2, outdir, flush_penalty=0):
     return res
 
 def main():
-    cfg = json.loads(Path("scripts/phase2_flush_config.json").read_text())
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--config", required=True)
+    ap.add_argument("--output-csv", required=True)
+    args = ap.parse_args()
+    cfg = json.loads(Path(args.config).read_text())
+    output_csv_path = args.output_csv
     results_root = Path(cfg["results_root"])
     results_root.mkdir(parents=True, exist_ok=True)
 
@@ -87,7 +93,7 @@ def main():
             r = run_gem5(cfg, "flush_assisted", w1, w2, outdir, penalty)
             rows.append({"pair":name,"policy":"flush_assisted","flush_penalty":penalty,**r})
 
-    output = results_root / "phase2_results.csv"
+    output = Path(output_csv_path)
     with open(output, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
