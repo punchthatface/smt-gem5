@@ -1,0 +1,32 @@
+{
+  "gem5_bin": "/users/rickycui/smt-gem5/gem5/build/X86/gem5.opt",
+  "config_script": "/users/rickycui/smt-gem5/configs/smt_flush.py",
+  "results_root": "/users/rickycui/smt-gem5/results/phase2_gem5",
+  "mem_size": "2GB",
+  "cpu_clock": "2GHz",
+  "max_ticks": 5000000000000,
+  "num_cores": 4,
+  "switch_interval": 1000000,
+  "flush_penalties": [5000, 10000],
+  "workloads": {
+    "swaptions": {
+      "cmd": "/users/rickycui/smt-gem5/parsec/pkgs/apps/swaptions/inst/amd64-linux.gcc-pthreads/bin/swaptions",
+      "options": "-ns 8 -sm 2000 -nt 1",
+      "domain": "A"
+    },
+    "blackscholes": {
+      "cmd": "/users/rickycui/smt-gem5/parsec/pkgs/apps/blackscholes/inst/amd64-linux.gcc-pthreads/bin/blackscholes",
+      "options": "1 /users/rickycui/smt-gem5/parsec/pkgs/apps/blackscholes/inputs/in_4K.txt /dev/null",
+      "domain": "A"
+    },
+    "streamcluster": {
+      "cmd": "/users/rickycui/smt-gem5/parsec/pkgs/kernels/streamcluster/inst/amd64-linux.gcc-pthreads/bin/streamcluster",
+      "options": "10 20 32 512 512 100 none output.txt 1",
+      "domain": "B"
+    }
+  },
+  "pairs": [
+    { "name": "A_vs_B", "w1": "swaptions", "w2": "streamcluster" },
+    { "name": "A_vs_A", "w1": "swaptions", "w2": "blackscholes" }
+  ]
+}
