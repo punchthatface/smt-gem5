@@ -4,7 +4,7 @@
   "results_root": "/users/rickycui/smt-gem5/results/phase2_gem5",
   "mem_size": "2GB",
   "cpu_clock": "2GHz",
-  "max_ticks": 5000000000000,
+  "max_ticks": 1000000000000,
   "num_cores": 4,
   "switch_interval": 1000000,
   "flush_penalties": [5000, 10000],
