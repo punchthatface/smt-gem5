@@ -18,15 +18,9 @@
       "cmd": "/users/rickycui/smt-gem5/parsec/pkgs/apps/blackscholes/inst/amd64-linux.gcc-pthreads/bin/blackscholes",
       "options": "1 /users/rickycui/smt-gem5/parsec/pkgs/apps/blackscholes/inputs/in_4K.txt /dev/null",
       "domain": "A"
-    },
-    "streamcluster": {
-      "cmd": "/users/rickycui/smt-gem5/parsec/pkgs/kernels/streamcluster/inst/amd64-linux.gcc-pthreads/bin/streamcluster",
-      "options": "10 20 32 512 512 100 none output.txt 1",
-      "domain": "B"
     }
   },
   "pairs": [
-    { "name": "A_vs_B", "w1": "swaptions", "w2": "streamcluster" },
     { "name": "A_vs_A", "w1": "swaptions", "w2": "blackscholes" }
   ]
 }
