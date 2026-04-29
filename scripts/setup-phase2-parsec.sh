@@ -26,8 +26,16 @@ if [ ! -f "$PARSEC_DIR/env.sh" ]; then
 fi
 
 cd "$PARSEC_DIR"
+
+export PARSECDIR="$PARSEC_DIR"
+export xxPARSECDIRxx="$PARSEC_DIR"
+
+# PARSEC env.sh may reference template variables before assigning them.
+# Temporarily disable nounset while sourcing it.
+set +u
 # shellcheck disable=SC1091
 . "$PARSEC_DIR/env.sh"
+set -u
 
 echo
 echo "=== Building Phase 2 PARSEC workloads ==="
