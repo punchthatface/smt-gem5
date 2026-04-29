@@ -54,11 +54,33 @@ fi
 cd "$PARSEC_DIR"
 ./configure
 
+# Source PARSEC environment before building packages.
+# shellcheck disable=SC1091
+. "$PARSEC_DIR/env.sh"
+
+# Build the PARSEC workloads used by the Phase 2 experiments.
+# Keep this list focused so setup does not become unnecessarily huge.
+PARSEC_PACKAGES=(
+  parsec.swaptions
+  parsec.streamcluster
+  parsec.blackscholes
+  parsec.fluidanimate
+  parsec.canneal
+)
+
+echo
+echo "Building PARSEC packages used by experiments..."
+for pkg in "${PARSEC_PACKAGES[@]}"; do
+  echo "[PARSEC BUILD] $pkg"
+  parsecmgmt -a build -p "$pkg" -c gcc-pthreads
+done
+
 echo
 echo "Setup complete."
 echo "gem5:   $GEM5_DIR/build/X86/gem5.opt"
 echo "parsec: $PARSEC_DIR"
 echo
-echo "To use PARSEC:"
-echo "  cd $PARSEC_DIR"
-echo "  . env.sh"
+echo "Built PARSEC packages:"
+for pkg in "${PARSEC_PACKAGES[@]}"; do
+  echo "  $pkg"
+done
