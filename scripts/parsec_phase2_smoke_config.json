@@ -1,0 +1,39 @@
+{
+  "repo_root": "/users/akim2/smt-gem5",
+  "gem5_bin": "/users/akim2/smt-gem5/gem5/build/X86/gem5.opt",
+  "config_script": "/users/akim2/smt-gem5/configs/smt_domain_flush.py",
+  "results_root": "/users/akim2/smt-gem5/results/parsec_phase2_rerun_shared_no_flush",
+  "mem_size": "512MB",
+  "cpu_clock": "2GHz",
+  "l1i_size": "32kB",
+  "l1d_size": "32kB",
+  "l2_size": "512kB",
+  "max_ticks": 2000000000,
+  "workloads": {
+    "swaptions": {
+      "cmd": "/users/akim2/smt-gem5/parsec/pkgs/apps/swaptions/inst/amd64-linux.gcc-pthreads/bin/swaptions",
+      "options": "-ns 2 -sm 100 -nt 1 -fi 0"
+    },
+    "swaptions_flush": {
+      "cmd": "/users/akim2/smt-gem5/parsec/pkgs/apps/swaptions/inst/amd64-linux.gcc-pthreads/bin/swaptions",
+      "options": "-ns 2 -sm 100 -nt 1 -fi 1"
+    },
+    "streamcluster": {
+      "cmd": "/users/akim2/smt-gem5/parsec/pkgs/kernels/streamcluster/inst/amd64-linux.gcc-pthreads/bin/streamcluster",
+      "options": "10 20 32 256 256 50 none output.txt 1"
+    }
+  },
+  "cases": [
+    {
+      "name": "shared_smt_no_flush",
+      "policy": "shared_smt_no_flush",
+      "num_cores": 1,
+      "threads_per_core": 2,
+      "max_ticks": 5000000000,
+      "jobs": [
+        { "workload": "swaptions", "core": 0 },
+        { "workload": "streamcluster", "core": 0 }
+      ]
+    }
+  ]
+}

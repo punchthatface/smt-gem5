@@ -1,0 +1,69 @@
+{
+  "repo_root": "/users/akim2/smt-gem5",
+  "gem5_bin": "/users/akim2/smt-gem5/gem5/build/X86/gem5.opt",
+  "config_script": "/users/akim2/smt-gem5/configs/smt_domain_flush.py",
+  "results_root": "/users/akim2/smt-gem5/results/domain_flush_level2",
+  "mem_size": "512MB",
+  "cpu_clock": "2GHz",
+  "l1i_size": "32kB",
+  "l1d_size": "32kB",
+  "l2_size": "512kB",
+  "max_ticks": 1000000000,
+
+  "workloads": {
+    "victim": {
+      "cmd": "/users/akim2/smt-gem5/workloads/bin/phase2_victim",
+      "options": "--iters 2000 --array-kb 128 --flush-bytes 0 --flush-interval 0"
+    },
+    "interferer": {
+      "cmd": "/users/akim2/smt-gem5/workloads/bin/phase2_interferer",
+      "options": "--iters 2000 --array-kb 1024 --stride 64 --write 1"
+    },
+    "domain_probe": {
+      "cmd": "/users/akim2/smt-gem5/workloads/bin/domain_switch_probe",
+      "options": "--phases 4 --phase-iters 20 --hot-kb 16 --stream-kb 128 --stride 64"
+    }
+  },
+
+  "cases": [
+    {
+      "name": "no_smt_separate_core",
+      "policy": "no_smt",
+      "num_cores": 2,
+      "threads_per_core": 1,
+      "jobs": [
+        { "workload": "victim", "core": 0 },
+        { "workload": "interferer", "core": 1 }
+      ]
+    },
+    {
+      "name": "shared_smt_no_flush",
+      "policy": "unrestricted_smt",
+      "num_cores": 1,
+      "threads_per_core": 2,
+      "jobs": [
+        { "workload": "victim", "core": 0 },
+        { "workload": "interferer", "core": 0 }
+      ]
+    },
+    {
+      "name": "domain_switch_no_flush",
+      "policy": "domain_switch_no_flush",
+      "num_cores": 1,
+      "threads_per_core": 1,
+      "jobs": [
+        { "workload": "domain_probe", "core": 0 }
+      ]
+    },
+    {
+      "name": "domain_switch_l1d_flush",
+      "policy": "domain_switch_l1d_flush",
+      "num_cores": 1,
+      "threads_per_core": 1,
+      "flush_on_workbegin": true,
+      "jobs": [
+        { "workload": "domain_probe", "core": 0 }
+      ]
+    }
+  ]
+}

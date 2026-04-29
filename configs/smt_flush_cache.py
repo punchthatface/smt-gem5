@@ -57,26 +57,12 @@ def split_opts(s):
 
 
 def add_x86_interrupt_wiring(cpu, membus):
-    # gem5 stable has used both old and new interrupt port names across versions.
-    # These guarded assignments keep the config portable.
-    try:
-        cpu.createInterruptController()
-        intr = cpu.interrupts[0]
-        try:
-            intr.pio = membus.mem_side_ports
-        except Exception:
-            pass
-        try:
-            intr.int_requestor = membus.cpu_side_ports
-            intr.int_responder = membus.mem_side_ports
-        except Exception:
-            try:
-                intr.int_master = membus.cpu_side_ports
-                intr.int_slave = membus.mem_side_ports
-            except Exception:
-                pass
-    except Exception:
-        pass
+    cpu.createInterruptController()
+
+    for intr in cpu.interrupts:
+        intr.pio = membus.mem_side_ports
+        intr.int_requestor = membus.cpu_side_ports
+        intr.int_responder = membus.mem_side_ports
 
 
 def connect_cpu_caches(cpu, l2bus, l1i_size, l1d_size):
@@ -130,6 +116,7 @@ for core_id, jobs in enumerate(per_core_jobs):
         )
 
 system = System()
+system.multi_thread = args.threads_per_core > 1
 system.clk_domain = SrcClockDomain()
 system.clk_domain.clock = args.cpu_clock
 system.clk_domain.voltage_domain = VoltageDomain()
@@ -141,13 +128,15 @@ system.membus = SystemXBar()
 system.l2bus = L2XBar()
 system.system_port = system.membus.cpu_side_ports
 
-system.cpu = []
+cpus = []
 for core_id in range(args.num_cores):
     cpu = O3CPU(cpu_id=core_id, numThreads=args.threads_per_core)
     cpu.clk_domain = system.clk_domain
     add_x86_interrupt_wiring(cpu, system.membus)
     connect_cpu_caches(cpu, system.l2bus, args.l1i_size, args.l1d_size)
-    system.cpu.append(cpu)
+    cpus.append(cpu)
+
+system.cpu = cpus
 
 system.l2cache = L2Cache(args.l2_size)
 system.l2cache.cpu_side = system.l2bus.mem_side_ports
