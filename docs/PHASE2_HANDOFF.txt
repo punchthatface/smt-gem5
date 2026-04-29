@@ -1,143 +1,64 @@
-Phase 2 handoff notes
-=====================
+Phase 2 handoff: final architecture-aware SMT experiment
+=========================================================
 
-Repo root used during development:
-  /users/akim2/smt-gem5
+Do not reduce final scope.
 
-Other users should replace this with their local repo path:
-  /users/<NETID>/smt-gem5
+Final target:
+  4 cores, 2 SMT threads/core = 8 hardware contexts.
+  8 unmodified PARSEC workloads.
+  4 policies:
+    1. no_smt
+    2. unrestricted_smt
+    3. constrained_smt
+    4. flush_smt
 
-Minimal tracked files needed for the final Phase 2 run
-------------------------------------------------------
-
-Gem5 config:
+Current implementation:
   configs/smt_domain_flush.py
+    - gem5 SE config
+    - supports periodic L1D cleanup with:
+        dcache.memWriteback()
+        dcache.memInvalidate()
+    - supports SMT resource policy forwarding:
+        --smt-resource-policy partitioned
 
-Runner:
-  scripts/run_parsec_phase2_smoke.py
+  scripts/run_phase2_experiment.py
+    - main runner
+    - forwards flush and SMT resource-policy fields from JSON to gem5
+    - writes CSV stats
 
-Final JSON configs:
-  scripts/phase2_configs/parsec_phase2_final_node0_config.json
-  scripts/phase2_configs/parsec_phase2_final_node1_config.json
+SMT resource policy status:
+  Tested on node0.
+  Applied:
+    smtFetchPolicy = RoundRobin
+    smtCommitPolicy = RoundRobin
+    smtROBPolicy = Partitioned
+    smtLSQPolicy = Partitioned
+  Not supported:
+    smtIQPolicy = Partitioned
 
-PARSEC swaptions patch files:
-  patches/swaptions/HJM_Securities.cpp
-  patches/swaptions/Makefile
-  patches/swaptions/README.md
+8 workload set:
+  swaptions       gcc-pthreads
+  blackscholes    gcc-pthreads
+  streamcluster   gcc-pthreads
+  fluidanimate    gcc-pthreads
+  canneal         gcc-pthreads
+  freqmine        gcc-openmp, OMP_NUM_THREADS=1
+  bodytrack       gcc-pthreads
+  dedup           gcc-pthreads
 
-Documentation:
-  docs/README_phase2_domain_flush.md
-  docs/PHASE2_HANDOFF.txt
+Setup helper:
+  scripts/setup-phase2-parsec.sh
 
-Important untracked/generated directories
------------------------------------------
+Optional run-dir copy helper:
+  scripts/copy-phase2-parsec-runs.sh
 
-Do not commit these:
+Directory policy:
+  scripts/phase2_configs/test/   short tests only
+  scripts/phase2_configs/final/  final configs only
+  results/test_runs/             short tests only
+  results/final/                 final runs only
 
-  parsec/
-  gem5/
-  results/
-  workloads/bin/
-  *.log
-  output.txt
-  blackscholes.out
-
-Applying swaptions patch after PARSEC setup
--------------------------------------------
-
-After running the normal repo setup and PARSEC setup, copy:
-
-  patches/swaptions/HJM_Securities.cpp
-
-to:
-
-  parsec/pkgs/apps/swaptions/src/HJM_Securities.cpp
-
-and copy:
-
-  patches/swaptions/Makefile
-
-to:
-
-  parsec/pkgs/apps/swaptions/src/Makefile
-
-Then update absolute paths in the Makefile if needed.
-
-Example:
-
-  sed -i "s#/users/akim2/smt-gem5#/users/<NETID>/smt-gem5#g" \
-    parsec/pkgs/apps/swaptions/src/Makefile
-
-Build gem5 m5ops
-----------------
-
-  cd /users/<NETID>/smt-gem5/gem5/util/m5
-  scons build/x86/out/libm5.a
-
-Rebuild swaptions
------------------
-
-  cd /users/<NETID>/smt-gem5/parsec
-  . env.sh
-
-  rm -rf pkgs/apps/swaptions/obj/amd64-linux.gcc-pthreads
-  rm -rf pkgs/apps/swaptions/inst/amd64-linux.gcc-pthreads
-
-  parsecmgmt -a build -p parsec.swaptions -c gcc-pthreads
-
-Verify swaptions
-----------------
-
-  file /users/<NETID>/smt-gem5/parsec/pkgs/apps/swaptions/inst/amd64-linux.gcc-pthreads/bin/swaptions
-
-Expected:
-  statically linked
-
-Native test:
-
-  /users/<NETID>/smt-gem5/parsec/pkgs/apps/swaptions/inst/amd64-linux.gcc-pthreads/bin/swaptions \
-    -ns 2 -sm 100 -nt 1 -fi 0
-
-Expected output includes:
-  Phase2 gem5 work marker interval: 0
-
-Do not run nonzero -fi natively. Nonzero -fi emits gem5 pseudo-instructions and should be used inside gem5 only.
-
-Final experiment structure
---------------------------
-
-node0:
-  swaptions + streamcluster
-
-node1:
-  swaptions + blackscholes
-
-Each final config runs:
-  1. no-SMT separate-core baseline
-  2. shared SMT no flush
-  3. shared SMT flush fi1
-  4. shared SMT flush fi2
-  5. shared SMT flush fi4
-
-Main command pattern
---------------------
-
-  python3 scripts/run_parsec_phase2_smoke.py \
-    --config scripts/phase2_configs/parsec_phase2_final_node0_config.json \
-    --output-csv results/parsec_phase2_final_node0.csv \
-    2>&1 | tee results/parsec_phase2_final_node0.log
-
-Use tmux for long runs.
-
-Result validity checks
-----------------------
-
-For every final row:
-  returncode should be 0
-  exit_cause should be "exiting with last active thread context"
-
-For no-flush cases:
-  flush_count should be 0
-
-For flush cases:
-  flush_count should be greater than 0
+Important:
+  Pairwise 1-core/2-thread configs are not the final-final experiment.
+  They are only sanity/evaluation extras.
+  Final-final must use the 4-core/8-thread policy mix.

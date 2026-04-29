@@ -52,32 +52,61 @@ def connect_cpu_caches(cpu, l2bus, l1i_size, l1d_size):
     cpu.dcache.mem_side = l2bus.cpu_side_ports
 
 
-def active_core_ids(per_core):
-    return [core_id for core_id, jobs in enumerate(per_core) if jobs]
+def safe_set_param(obj, name, value, applied, skipped):
+    """Set a SimObject parameter if gem5 exposes it in this build."""
+    if value is None or value == "":
+        return
+    try:
+        setattr(obj, name, value)
+        applied.append(f"{obj.path() if hasattr(obj, 'path') else obj}.{name}={value}")
+    except Exception as e:
+        skipped.append(f"{name}={value} ({e})")
 
 
-def flush_target_core_ids(args, cpus, per_core):
-    """Return the core IDs whose L1D caches should be cleaned.
-
-    Backward compatibility:
-      --flush-all-cores still forces all cores.
-
-    New policy:
-      --flush-scope core0   flush only --flush-core, default core 0
-      --flush-scope active  flush cores that have at least one workload
-      --flush-scope all     flush all simulated cores
+def apply_smt_resource_policy(cpu, args, applied, skipped):
     """
-    if args.flush_all_cores or args.flush_scope == "all":
+    Expose gem5 O3 SMT resource-sharing knobs from the config.
+
+    This is the closest 30-minute architecture-level improvement:
+    it uses gem5's actual O3 SMT resource policies when available
+    rather than only changing workload placement.
+    """
+    if args.smt_resource_policy == "fair":
+        # Make shared SMT scheduling less arbitrary by preferring round-robin
+        # thread selection in fetch/commit when supported.
+        safe_set_param(cpu, "smtFetchPolicy", "RoundRobin", applied, skipped)
+        safe_set_param(cpu, "smtCommitPolicy", "RoundRobin", applied, skipped)
+
+    elif args.smt_resource_policy == "partitioned":
+        # Partition shared O3 resources between SMT threads when supported.
+        # This directly models restricted/constrained SMT resource sharing.
+        safe_set_param(cpu, "smtFetchPolicy", "RoundRobin", applied, skipped)
+        safe_set_param(cpu, "smtCommitPolicy", "RoundRobin", applied, skipped)
+        safe_set_param(cpu, "smtROBPolicy", "Partitioned", applied, skipped)
+        safe_set_param(cpu, "smtIQPolicy", "Partitioned", applied, skipped)
+        safe_set_param(cpu, "smtLSQPolicy", "Partitioned", applied, skipped)
+
+    # Manual overrides always win.
+    safe_set_param(cpu, "smtFetchPolicy", args.smt_fetch_policy, applied, skipped)
+    safe_set_param(cpu, "smtCommitPolicy", args.smt_commit_policy, applied, skipped)
+    safe_set_param(cpu, "smtROBPolicy", args.smt_rob_policy, applied, skipped)
+    safe_set_param(cpu, "smtIQPolicy", args.smt_iq_policy, applied, skipped)
+    safe_set_param(cpu, "smtLSQPolicy", args.smt_lsq_policy, applied, skipped)
+
+    if args.smt_num_fetching_threads is not None:
+        safe_set_param(cpu, "smtNumFetchingThreads", args.smt_num_fetching_threads, applied, skipped)
+
+
+def get_flush_target_cores(cpus, per_core, flush_scope, flush_core):
+    if flush_scope == "all":
         return list(range(len(cpus)))
-    if args.flush_scope == "active":
-        return active_core_ids(per_core)
-    if args.flush_core < 0 or args.flush_core >= len(cpus):
-        raise RuntimeError(f"Invalid --flush-core {args.flush_core}")
-    return [args.flush_core]
+    if flush_scope == "active":
+        return [cid for cid, jobs in enumerate(per_core) if jobs]
+    return [flush_core]
 
 
-def flush_l1d(cpus, target_core_ids):
-    for cid in target_core_ids:
+def flush_l1d(cpus, target_cores):
+    for cid in target_cores:
         dcache = cpus[cid].dcache
         dcache.memWriteback()
         dcache.memInvalidate()
@@ -93,20 +122,28 @@ parser.add_argument("--l1d-size", default="32kB")
 parser.add_argument("--l2-size", default="512kB")
 parser.add_argument("--max-ticks", type=int, default=1000000000)
 
-# Marker-triggered cleanup path kept for compatibility with prior experiments.
+# Legacy marker-based path kept for compatibility with old configs.
 parser.add_argument("--flush-on-workbegin", action="store_true")
-
-# New gem5-controlled periodic cleanup path.
-# This models a scheduler/security cleanup quantum without modifying benchmarks.
-parser.add_argument("--flush-every-ticks", type=int, default=0,
-                    help="If >0, periodically perform gem5-side L1D writeback+invalidate every N simulated ticks.")
-parser.add_argument("--flush-scope", choices=["core0", "active", "all"], default="core0",
-                    help="Which L1D caches to clean for workbegin/periodic flushes. Default preserves old core0 behavior.")
-parser.add_argument("--flush-core", type=int, default=0,
-                    help="Core ID to flush when --flush-scope=core0.")
-
-# Backward-compatible shortcut. Equivalent to --flush-scope all.
 parser.add_argument("--flush-all-cores", action="store_true")
+
+# New benchmark-independent periodic cleanup path.
+parser.add_argument("--flush-every-ticks", type=int, default=0)
+parser.add_argument("--flush-scope", choices=["core0", "active", "all"], default="core0")
+parser.add_argument("--flush-core", type=int, default=0)
+
+# Architecture-aware SMT resource policy knobs.
+parser.add_argument(
+    "--smt-resource-policy",
+    choices=["default", "fair", "partitioned"],
+    default="default",
+    help="Use gem5 O3 SMT resource policy knobs when available."
+)
+parser.add_argument("--smt-fetch-policy", default="")
+parser.add_argument("--smt-commit-policy", default="")
+parser.add_argument("--smt-rob-policy", default="")
+parser.add_argument("--smt-iq-policy", default="")
+parser.add_argument("--smt-lsq-policy", default="")
+parser.add_argument("--smt-num-fetching-threads", type=int, default=None)
 
 parser.add_argument("--job-cmd", action="append", default=[])
 parser.add_argument("--job-opts", action="append", default=[])
@@ -117,13 +154,11 @@ if not args.job_cmd:
     raise RuntimeError("Need at least one --job-cmd")
 if not (len(args.job_cmd) == len(args.job_opts) == len(args.job_core)):
     raise RuntimeError("--job-cmd, --job-opts, and --job-core must have same length")
-if args.flush_every_ticks < 0:
-    raise RuntimeError("--flush-every-ticks must be >= 0")
+if args.flush_core < 0 or args.flush_core >= args.num_cores:
+    raise RuntimeError(f"Invalid --flush-core {args.flush_core}")
 
 system = System()
-# Only need work-item exits when using m5ops/workbegin marker experiments.
-# Periodic flushing does not depend on benchmark markers.
-system.exit_on_work_items = bool(args.flush_on_workbegin)
+system.exit_on_work_items = True
 system.work_begin_exit_count = 1
 system.multi_thread = args.threads_per_core > 1
 system.clk_domain = SrcClockDomain()
@@ -140,10 +175,14 @@ system.l2cache = L2Cache(size=args.l2_size)
 system.l2cache.cpu_side = system.l2bus.mem_side_ports
 system.l2cache.mem_side = system.membus.cpu_side_ports
 
+applied_smt_params = []
+skipped_smt_params = []
+
 cpus = []
 for core_id in range(args.num_cores):
     cpu = O3CPU(cpu_id=core_id, numThreads=args.threads_per_core)
     cpu.clk_domain = system.clk_domain
+    apply_smt_resource_policy(cpu, args, applied_smt_params, skipped_smt_params)
     add_x86_interrupt_wiring(cpu, system.membus)
     connect_cpu_caches(cpu, system.l2bus, args.l1i_size, args.l1d_size)
     cpus.append(cpu)
@@ -172,36 +211,41 @@ for core_id, jobs in enumerate(per_core):
 root = Root(full_system=False, system=system)
 m5.instantiate()
 
-target_core_ids = flush_target_core_ids(args, system.cpu, per_core)
+flush_target_cores = get_flush_target_cores(system.cpu, per_core, args.flush_scope, args.flush_core)
+if args.flush_all_cores:
+    flush_target_cores = list(range(len(system.cpu)))
 
 print("Beginning domain-switch flush simulation")
 print(f"num_cores={args.num_cores}, threads_per_core={args.threads_per_core}")
-print(f"flush_on_workbegin={args.flush_on_workbegin}")
+print(f"flush_on_workbegin={args.flush_on_workbegin}, flush_all_cores={args.flush_all_cores}")
 print(f"flush_every_ticks={args.flush_every_ticks}")
-print(f"flush_scope={args.flush_scope}, flush_all_cores={args.flush_all_cores}, flush_core={args.flush_core}")
-print(f"flush_target_cores={target_core_ids}")
+print(f"flush_scope={args.flush_scope}, flush_core={args.flush_core}")
+print(f"flush_target_cores={flush_target_cores}")
+print(f"smt_resource_policy={args.smt_resource_policy}")
+print(f"applied_smt_params={applied_smt_params}")
+print(f"skipped_smt_params={skipped_smt_params}")
+
 for core_id, jobs in enumerate(per_core):
     print(f"core {core_id}:")
     for j, p in enumerate(jobs):
         print(f"  job{j}: {p.cmd}")
 
 flush_count = 0
-last_cause = "not simulated"
+elapsed_since_periodic_flush = 0
+last_cause = "not started"
 
 while True:
-    cur_tick = int(m5.curTick())
-    remaining = args.max_ticks - cur_tick
+    remaining = args.max_ticks - int(m5.curTick())
     if remaining <= 0:
         last_cause = "simulate() limit reached"
-        print(f"Exit at tick {m5.curTick()} because {last_cause}")
         break
 
     if args.flush_every_ticks > 0:
-        ticks_to_run = min(args.flush_every_ticks, remaining)
+        run_ticks = min(args.flush_every_ticks, remaining)
     else:
-        ticks_to_run = remaining
+        run_ticks = remaining
 
-    exit_event = m5.simulate(ticks_to_run)
+    exit_event = m5.simulate(run_ticks)
     cause = exit_event.getCause()
     last_cause = cause
     print(f"Exit at tick {m5.curTick()} because {cause}")
@@ -210,23 +254,26 @@ while True:
     if "workbegin" in lcause:
         if args.flush_on_workbegin:
             print("DOMAIN_FLUSH_BEGIN reason=workbegin")
-            flush_l1d(system.cpu, target_core_ids)
+            flush_l1d(system.cpu, flush_target_cores)
             flush_count += 1
             print("DOMAIN_FLUSH_END reason=workbegin")
         else:
             print("DOMAIN_SWITCH_NO_FLUSH")
         continue
 
-    # With periodic flushing, gem5 returns "simulate() limit reached" every time
-    # the requested chunk elapsed. If this is not the global max tick, treat it
-    # as a cleanup quantum boundary and continue.
-    if args.flush_every_ticks > 0 and "simulate() limit reached" in lcause:
-        if int(m5.curTick()) < args.max_ticks:
-            print("DOMAIN_FLUSH_BEGIN reason=periodic")
-            flush_l1d(system.cpu, target_core_ids)
-            flush_count += 1
-            print("DOMAIN_FLUSH_END reason=periodic")
-            continue
+    # If the workload exited naturally, stop immediately.
+    if "exiting with last active thread context" in lcause or "exiting with last active thread" in lcause:
+        break
+
+    # If no non-tick exit happened and periodic flushing is enabled, this simulate()
+    # returned because the requested quantum expired. Flush unless this was the final
+    # max-tick boundary.
+    if args.flush_every_ticks > 0 and int(m5.curTick()) < args.max_ticks:
+        print("DOMAIN_FLUSH_BEGIN reason=periodic")
+        flush_l1d(system.cpu, flush_target_cores)
+        flush_count += 1
+        print("DOMAIN_FLUSH_END reason=periodic")
+        continue
 
     break
 

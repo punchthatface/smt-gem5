@@ -39,21 +39,35 @@ def sum_stats(stats, contains, endings):
 
 
 def get_case_or_cfg(cfg, case, key, default=None):
-    return case.get(key, cfg.get(key, default))
+    return case[key] if key in case else cfg.get(key, default)
 
 
 def build_cmd(cfg, case, outdir):
-    max_ticks = get_case_or_cfg(cfg, case, "max_ticks", 3000000000)
+    num_cores = int(get_case_or_cfg(cfg, case, "num_cores", 1))
+    threads_per_core = int(get_case_or_cfg(cfg, case, "threads_per_core", 1))
+    max_ticks = int(get_case_or_cfg(cfg, case, "max_ticks", 3000000000))
+
+    marker_flush_enabled = bool(get_case_or_cfg(cfg, case, "flush_on_workbegin", False))
+    flush_all_cores = bool(get_case_or_cfg(cfg, case, "flush_all_cores", False))
+
     flush_every_ticks = int(get_case_or_cfg(cfg, case, "flush_every_ticks", 0) or 0)
     flush_scope = get_case_or_cfg(cfg, case, "flush_scope", "core0")
     flush_core = int(get_case_or_cfg(cfg, case, "flush_core", 0) or 0)
+
+    smt_resource_policy = get_case_or_cfg(cfg, case, "smt_resource_policy", "default")
+    smt_fetch_policy = get_case_or_cfg(cfg, case, "smt_fetch_policy", "")
+    smt_commit_policy = get_case_or_cfg(cfg, case, "smt_commit_policy", "")
+    smt_rob_policy = get_case_or_cfg(cfg, case, "smt_rob_policy", "")
+    smt_iq_policy = get_case_or_cfg(cfg, case, "smt_iq_policy", "")
+    smt_lsq_policy = get_case_or_cfg(cfg, case, "smt_lsq_policy", "")
+    smt_num_fetching_threads = get_case_or_cfg(cfg, case, "smt_num_fetching_threads", None)
 
     cmd = [
         cfg["gem5_bin"],
         "--outdir=" + str(outdir),
         cfg["config_script"],
-        "--num-cores", str(get_case_or_cfg(cfg, case, "num_cores", 1)),
-        "--threads-per-core", str(get_case_or_cfg(cfg, case, "threads_per_core", 1)),
+        "--num-cores", str(num_cores),
+        "--threads-per-core", str(threads_per_core),
         "--mem-size", cfg.get("mem_size", "512MB"),
         "--cpu-clock", cfg.get("cpu_clock", "2GHz"),
         "--l1i-size", cfg.get("l1i_size", "32kB"),
@@ -62,13 +76,13 @@ def build_cmd(cfg, case, outdir):
         "--max-ticks", str(max_ticks),
     ]
 
-    # Legacy / marker-based path. Keep this so older validation configs still run.
-    if case.get("flush_on_workbegin", False):
+    if marker_flush_enabled:
         cmd.append("--flush-on-workbegin")
-    if case.get("flush_all_cores", False):
+    if flush_all_cores:
         cmd.append("--flush-all-cores")
 
-    # New gem5-controlled periodic cleanup path. Benchmarks do not need markers.
+    # Periodic gem5-side L1D cleanup.
+    # Pass only when enabled, so old no-flush configs stay clean.
     if flush_every_ticks > 0:
         cmd += [
             "--flush-every-ticks", str(flush_every_ticks),
@@ -76,10 +90,29 @@ def build_cmd(cfg, case, outdir):
             "--flush-core", str(flush_core),
         ]
 
+    # Architecture-aware SMT resource policy knobs.
+    # These are forwarded to configs/smt_domain_flush.py. That config reports
+    # which gem5 O3 parameters were applied or skipped.
+    if smt_resource_policy:
+        cmd += ["--smt-resource-policy", str(smt_resource_policy)]
+    if smt_fetch_policy:
+        cmd += ["--smt-fetch-policy", str(smt_fetch_policy)]
+    if smt_commit_policy:
+        cmd += ["--smt-commit-policy", str(smt_commit_policy)]
+    if smt_rob_policy:
+        cmd += ["--smt-rob-policy", str(smt_rob_policy)]
+    if smt_iq_policy:
+        cmd += ["--smt-iq-policy", str(smt_iq_policy)]
+    if smt_lsq_policy:
+        cmd += ["--smt-lsq-policy", str(smt_lsq_policy)]
+    if smt_num_fetching_threads is not None:
+        cmd += ["--smt-num-fetching-threads", str(smt_num_fetching_threads)]
+
     for js in case["jobs"]:
         w = cfg["workloads"][js["workload"]]
         opts = js.get("options", w.get("options", ""))
         cmd += ["--job-cmd", w["cmd"], "--job-opts", opts, "--job-core", str(js["core"])]
+
     return cmd
 
 
@@ -90,8 +123,15 @@ def run_case(cfg, case):
 
     print("\n[RUN]", case["name"])
     print(" ".join(shlex.quote(x) for x in cmd), flush=True)
+
     t0 = time.time()
-    proc = subprocess.run(cmd, cwd=cfg["repo_root"], text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    proc = subprocess.run(
+        cmd,
+        cwd=cfg["repo_root"],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
     wall = time.time() - t0
 
     log = proc.stdout or ""
@@ -135,25 +175,40 @@ def run_case(cfg, case):
         if m:
             exit_cause = m[-1].strip()
 
+    marker_flush_enabled = bool(get_case_or_cfg(cfg, case, "flush_on_workbegin", False))
     flush_every_ticks = int(get_case_or_cfg(cfg, case, "flush_every_ticks", 0) or 0)
+    periodic_flush_enabled = flush_every_ticks > 0
     flush_scope = get_case_or_cfg(cfg, case, "flush_scope", "core0")
     flush_core = int(get_case_or_cfg(cfg, case, "flush_core", 0) or 0)
-    marker_flush = bool(case.get("flush_on_workbegin", False))
-    periodic_flush = flush_every_ticks > 0
+
+    smt_resource_policy = get_case_or_cfg(cfg, case, "smt_resource_policy", "default")
+    smt_fetch_policy = get_case_or_cfg(cfg, case, "smt_fetch_policy", "")
+    smt_commit_policy = get_case_or_cfg(cfg, case, "smt_commit_policy", "")
+    smt_rob_policy = get_case_or_cfg(cfg, case, "smt_rob_policy", "")
+    smt_iq_policy = get_case_or_cfg(cfg, case, "smt_iq_policy", "")
+    smt_lsq_policy = get_case_or_cfg(cfg, case, "smt_lsq_policy", "")
+    smt_num_fetching_threads = get_case_or_cfg(cfg, case, "smt_num_fetching_threads", None)
 
     return {
         "name": case["name"],
         "policy": case.get("policy", case["name"]),
         "returncode": proc.returncode,
-        "num_cores": get_case_or_cfg(cfg, case, "num_cores", 1),
-        "threads_per_core": get_case_or_cfg(cfg, case, "threads_per_core", 1),
+        "num_cores": int(get_case_or_cfg(cfg, case, "num_cores", 1)),
+        "threads_per_core": int(get_case_or_cfg(cfg, case, "threads_per_core", 1)),
         "job_count": len(case["jobs"]),
-        "flush_enabled": int(marker_flush or periodic_flush),
-        "marker_flush_enabled": int(marker_flush),
-        "periodic_flush_enabled": int(periodic_flush),
+        "flush_enabled": int(marker_flush_enabled or periodic_flush_enabled),
+        "marker_flush_enabled": int(marker_flush_enabled),
+        "periodic_flush_enabled": int(periodic_flush_enabled),
         "flush_every_ticks": flush_every_ticks,
         "flush_scope": flush_scope,
         "flush_core": flush_core,
+        "smt_resource_policy": smt_resource_policy,
+        "smt_fetch_policy": smt_fetch_policy,
+        "smt_commit_policy": smt_commit_policy,
+        "smt_rob_policy": smt_rob_policy,
+        "smt_iq_policy": smt_iq_policy,
+        "smt_lsq_policy": smt_lsq_policy,
+        "smt_num_fetching_threads": smt_num_fetching_threads,
         "flush_count": flush_count,
         "work_items_started": work_items,
         "simInsts": sim_insts,
