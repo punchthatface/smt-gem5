@@ -1,0 +1,70 @@
+{
+  "repo_root": "/users/akim2/smt-gem5",
+  "gem5_bin": "/users/akim2/smt-gem5/gem5/build/X86/gem5.opt",
+  "config_script": "/users/akim2/smt-gem5/configs/smt_domain_flush.py",
+  "results_root": "/users/akim2/smt-gem5/results/parsec_phase2_level4_node2",
+  "mem_size": "512MB",
+  "cpu_clock": "2GHz",
+  "l1i_size": "32kB",
+  "l1d_size": "32kB",
+  "l2_size": "512kB",
+  "max_ticks": 20000000000,
+  "workloads": {
+    "swaptions_fi0": {
+      "cmd": "/users/akim2/smt-gem5/parsec/pkgs/apps/swaptions/inst/amd64-linux.gcc-pthreads/bin/swaptions",
+      "options": "-ns 4 -sm 200 -nt 1 -fi 0"
+    },
+    "swaptions_fi1": {
+      "cmd": "/users/akim2/smt-gem5/parsec/pkgs/apps/swaptions/inst/amd64-linux.gcc-pthreads/bin/swaptions",
+      "options": "-ns 4 -sm 200 -nt 1 -fi 1"
+    },
+    "swaptions_fi2": {
+      "cmd": "/users/akim2/smt-gem5/parsec/pkgs/apps/swaptions/inst/amd64-linux.gcc-pthreads/bin/swaptions",
+      "options": "-ns 4 -sm 200 -nt 1 -fi 2"
+    },
+    "swaptions_fi4": {
+      "cmd": "/users/akim2/smt-gem5/parsec/pkgs/apps/swaptions/inst/amd64-linux.gcc-pthreads/bin/swaptions",
+      "options": "-ns 4 -sm 200 -nt 1 -fi 4"
+    },
+    "streamcluster": {
+      "cmd": "/users/akim2/smt-gem5/parsec/pkgs/kernels/streamcluster/inst/amd64-linux.gcc-pthreads/bin/streamcluster",
+      "options": "10 20 32 256 256 50 none output.txt 1"
+    }
+  },
+  "cases": [
+    {
+      "name": "shared_smt_fi2_l1d_flush",
+      "policy": "shared_smt_l1d_flush_fi2",
+      "num_cores": 1,
+      "threads_per_core": 2,
+      "flush_on_workbegin": true,
+      "jobs": [
+        {
+          "workload": "swaptions_fi2",
+          "core": 0
+        },
+        {
+          "workload": "streamcluster",
+          "core": 0
+        }
+      ]
+    },
+    {
+      "name": "shared_smt_fi4_l1d_flush",
+      "policy": "shared_smt_l1d_flush_fi4",
+      "num_cores": 1,
+      "threads_per_core": 2,
+      "flush_on_workbegin": true,
+      "jobs": [
+        {
+          "workload": "swaptions_fi4",
+          "core": 0
+        },
+        {
+          "workload": "streamcluster",
+          "core": 0
+        }
+      ]
+    }
+  ]
+}
