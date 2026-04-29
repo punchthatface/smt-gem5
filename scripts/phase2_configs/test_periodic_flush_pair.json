@@ -1,0 +1,48 @@
+{
+  "repo_root": "/users/akim2/smt-gem5",
+  "gem5_bin": "/users/akim2/smt-gem5/gem5/build/X86/gem5.opt",
+  "config_script": "/users/akim2/smt-gem5/configs/smt_domain_flush.py",
+  "results_root": "/users/akim2/smt-gem5/results/test_runs/periodic_flush_pair",
+  "mem_size": "512MB",
+  "cpu_clock": "2GHz",
+  "l1i_size": "32kB",
+  "l1d_size": "32kB",
+  "l2_size": "512kB",
+  "max_ticks": 5000000000,
+
+  "workloads": {
+    "blackscholes": {
+      "cmd": "/users/akim2/smt-gem5/parsec/pkgs/apps/blackscholes/inst/amd64-linux.gcc-pthreads/bin/blackscholes",
+      "options": "1 /users/akim2/smt-gem5/parsec/pkgs/apps/blackscholes/run/in_4K.txt blackscholes.out"
+    },
+    "streamcluster": {
+      "cmd": "/users/akim2/smt-gem5/parsec/pkgs/kernels/streamcluster/inst/amd64-linux.gcc-pthreads/bin/streamcluster",
+      "options": "10 20 32 256 256 50 none output.txt 1"
+    }
+  },
+
+  "cases": [
+    {
+      "name": "black_stream_shared_no_flush",
+      "policy": "shared_smt_no_flush",
+      "num_cores": 1,
+      "threads_per_core": 2,
+      "jobs": [
+        { "workload": "blackscholes", "core": 0 },
+        { "workload": "streamcluster", "core": 0 }
+      ]
+    },
+    {
+      "name": "black_stream_shared_periodic_flush",
+      "policy": "shared_smt_periodic_l1d_flush",
+      "num_cores": 1,
+      "threads_per_core": 2,
+      "flush_every_ticks": 500000000,
+      "flush_scope": "active",
+      "jobs": [
+        { "workload": "blackscholes", "core": 0 },
+        { "workload": "streamcluster", "core": 0 }
+      ]
+    }
+  ]
+}

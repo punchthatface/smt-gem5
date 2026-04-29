@@ -38,24 +38,43 @@ def sum_stats(stats, contains, endings):
     return total if found else 0.0
 
 
+def get_case_or_cfg(cfg, case, key, default=None):
+    return case.get(key, cfg.get(key, default))
+
+
 def build_cmd(cfg, case, outdir):
+    max_ticks = get_case_or_cfg(cfg, case, "max_ticks", 3000000000)
+    flush_every_ticks = int(get_case_or_cfg(cfg, case, "flush_every_ticks", 0) or 0)
+    flush_scope = get_case_or_cfg(cfg, case, "flush_scope", "core0")
+    flush_core = int(get_case_or_cfg(cfg, case, "flush_core", 0) or 0)
+
     cmd = [
         cfg["gem5_bin"],
         "--outdir=" + str(outdir),
         cfg["config_script"],
-        "--num-cores", str(case.get("num_cores", cfg.get("num_cores", 1))),
-        "--threads-per-core", str(case.get("threads_per_core", cfg.get("threads_per_core", 1))),
+        "--num-cores", str(get_case_or_cfg(cfg, case, "num_cores", 1)),
+        "--threads-per-core", str(get_case_or_cfg(cfg, case, "threads_per_core", 1)),
         "--mem-size", cfg.get("mem_size", "512MB"),
         "--cpu-clock", cfg.get("cpu_clock", "2GHz"),
         "--l1i-size", cfg.get("l1i_size", "32kB"),
         "--l1d-size", cfg.get("l1d_size", "32kB"),
         "--l2-size", cfg.get("l2_size", "512kB"),
-        "--max-ticks", str(case.get("max_ticks", cfg.get("max_ticks", 3000000000))),
+        "--max-ticks", str(max_ticks),
     ]
+
+    # Legacy / marker-based path. Keep this so older validation configs still run.
     if case.get("flush_on_workbegin", False):
         cmd.append("--flush-on-workbegin")
     if case.get("flush_all_cores", False):
         cmd.append("--flush-all-cores")
+
+    # New gem5-controlled periodic cleanup path. Benchmarks do not need markers.
+    if flush_every_ticks > 0:
+        cmd += [
+            "--flush-every-ticks", str(flush_every_ticks),
+            "--flush-scope", str(flush_scope),
+            "--flush-core", str(flush_core),
+        ]
 
     for js in case["jobs"]:
         w = cfg["workloads"][js["workload"]]
@@ -116,14 +135,25 @@ def run_case(cfg, case):
         if m:
             exit_cause = m[-1].strip()
 
+    flush_every_ticks = int(get_case_or_cfg(cfg, case, "flush_every_ticks", 0) or 0)
+    flush_scope = get_case_or_cfg(cfg, case, "flush_scope", "core0")
+    flush_core = int(get_case_or_cfg(cfg, case, "flush_core", 0) or 0)
+    marker_flush = bool(case.get("flush_on_workbegin", False))
+    periodic_flush = flush_every_ticks > 0
+
     return {
         "name": case["name"],
         "policy": case.get("policy", case["name"]),
         "returncode": proc.returncode,
-        "num_cores": case.get("num_cores", cfg.get("num_cores", 1)),
-        "threads_per_core": case.get("threads_per_core", cfg.get("threads_per_core", 1)),
+        "num_cores": get_case_or_cfg(cfg, case, "num_cores", 1),
+        "threads_per_core": get_case_or_cfg(cfg, case, "threads_per_core", 1),
         "job_count": len(case["jobs"]),
-        "flush_enabled": int(case.get("flush_on_workbegin", False)),
+        "flush_enabled": int(marker_flush or periodic_flush),
+        "marker_flush_enabled": int(marker_flush),
+        "periodic_flush_enabled": int(periodic_flush),
+        "flush_every_ticks": flush_every_ticks,
+        "flush_scope": flush_scope,
+        "flush_core": flush_core,
         "flush_count": flush_count,
         "work_items_started": work_items,
         "simInsts": sim_insts,
