@@ -11,6 +11,46 @@ from pathlib import Path
 STAT_RE = re.compile(r"^(\S+)\s+([-+0-9.eE]+)")
 
 
+BAD_LOG_PATTERNS = [
+    ("ThreadCreationException", "ThreadCreationException"),
+    ("Error creating thread", "Error creating thread"),
+    ("terminate called after throwing", "C++ terminate/exception"),
+    ("Segmentation fault", "Segmentation fault"),
+    ("segmentation fault", "segmentation fault"),
+    ("Aborted", "Aborted"),
+    ("std::bad_alloc", "std::bad_alloc"),
+    ("panic:", "gem5 panic"),
+    ("fatal:", "gem5 fatal"),
+]
+
+
+def detect_failure(log: str, returncode: int):
+    reasons = []
+    if returncode != 0:
+        reasons.append(f"gem5_returncode={returncode}")
+    for pat, reason in BAD_LOG_PATTERNS:
+        if pat in log:
+            reasons.append(reason)
+    seen = set()
+    uniq = []
+    for r in reasons:
+        if r not in seen:
+            uniq.append(r)
+            seen.add(r)
+    return uniq
+
+
+def write_rows_csv(rows, output_csv):
+    if not rows:
+        return
+    out = Path(output_csv)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with out.open("w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
+        writer.writeheader()
+        writer.writerows(rows)
+
+
 def parse_stats(path: Path):
     stats = {}
     if not path.exists():
@@ -137,7 +177,10 @@ def run_case(cfg, case):
     log = proc.stdout or ""
     (outdir / "run.log").write_text(log, errors="ignore")
     print(log[-2500:], flush=True)
+    failure_reasons = detect_failure(log, proc.returncode)
     print(f"[TIME] {wall:.2f}s returncode={proc.returncode}", flush=True)
+    if failure_reasons:
+        print("[DETECTED_FAILURE] " + "; ".join(failure_reasons), flush=True)
 
     stats = parse_stats(outdir / "stats.txt")
     sim_insts = stats.get("simInsts", 0.0)
@@ -193,6 +236,8 @@ def run_case(cfg, case):
         "name": case["name"],
         "policy": case.get("policy", case["name"]),
         "returncode": proc.returncode,
+        "detected_failure": int(bool(failure_reasons)),
+        "failure_reason": "; ".join(failure_reasons),
         "num_cores": int(get_case_or_cfg(cfg, case, "num_cores", 1)),
         "threads_per_core": int(get_case_or_cfg(cfg, case, "threads_per_core", 1)),
         "job_count": len(case["jobs"]),
@@ -230,23 +275,26 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", required=True)
     ap.add_argument("--output-csv", required=True)
+    ap.add_argument(
+        "--stop-on-detected-failure",
+        action="store_true",
+        help="Stop after a case if gem5 returns nonzero or the output log contains known application/gem5 failure patterns.",
+    )
     args = ap.parse_args()
 
     cfg = json.loads(Path(args.config).read_text())
     Path(cfg["results_root"]).mkdir(parents=True, exist_ok=True)
 
     rows = []
-    for case in cfg["cases"]:
-        rows.append(run_case(cfg, case))
-
     out = Path(args.output_csv)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    with out.open("w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
-        writer.writeheader()
-        writer.writerows(rows)
-
-    print("\nWrote", out)
+    for case in cfg["cases"]:
+        row = run_case(cfg, case)
+        rows.append(row)
+        write_rows_csv(rows, out)
+        print("\nWrote", out)
+        if args.stop_on_detected_failure and (row["returncode"] != 0 or row["detected_failure"]):
+            print("Stopping because --stop-on-detected-failure is enabled.")
+            break
 
 
 if __name__ == "__main__":
