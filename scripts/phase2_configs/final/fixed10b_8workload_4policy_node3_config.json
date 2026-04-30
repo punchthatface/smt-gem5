@@ -2,14 +2,14 @@
   "repo_root": "/users/akim2/smt-gem5",
   "gem5_bin": "/users/akim2/smt-gem5/gem5/build/X86/gem5.opt",
   "config_script": "/users/akim2/smt-gem5/configs/smt_domain_flush.py",
-  "results_root": "/users/akim2/smt-gem5/results/final/8workload_4policy_node0",
+  "results_root": "/users/akim2/smt-gem5/results/final/8workload_4policy_fixed10b_node3",
   "mem_size": "512MB",
   "cpu_clock": "2GHz",
   "l1i_size": "32kB",
   "l1d_size": "32kB",
   "l2_size": "512kB",
-  "max_ticks": 500000000000,
-  "flush_every_ticks": 2000000000,
+  "max_ticks": 10000000000,
+  "flush_every_ticks": 1000000000,
   "flush_scope": "active",
   "workloads": {
     "swaptions": {
@@ -47,8 +47,8 @@
   },
   "cases": [
     {
-      "name": "no_smt_8workloads",
-      "policy": "no_smt_8c1t",
+      "name": "no_smt_8workloads_fixed10b",
+      "policy": "no_smt_8c1t_fixed10b",
       "num_cores": 8,
       "threads_per_core": 1,
       "flush_every_ticks": 0,
@@ -88,8 +88,8 @@
       ]
     },
     {
-      "name": "unrestricted_smt_4c8t",
-      "policy": "unrestricted_smt_4c8t",
+      "name": "unrestricted_smt_4c8t_fixed10b",
+      "policy": "unrestricted_smt_4c8t_fixed10b",
       "num_cores": 4,
       "threads_per_core": 2,
       "flush_every_ticks": 0,
@@ -99,7 +99,7 @@
           "core": 0
         },
         {
-          "workload": "streamcluster",
+          "workload": "fluidanimate",
           "core": 0
         },
         {
@@ -107,19 +107,19 @@
           "core": 1
         },
         {
-          "workload": "canneal",
+          "workload": "dedup",
           "core": 1
         },
         {
-          "workload": "fluidanimate",
-          "core": 2
-        },
-        {
-          "workload": "dedup",
+          "workload": "streamcluster",
           "core": 2
         },
         {
           "workload": "freqmine",
+          "core": 2
+        },
+        {
+          "workload": "canneal",
           "core": 3
         },
         {
@@ -129,8 +129,8 @@
       ]
     },
     {
-      "name": "constrained_smt_4c8t",
-      "policy": "constrained_smt_4c8t_resource_partitioned",
+      "name": "constrained_smt_4c8t_fixed10b",
+      "policy": "constrained_smt_4c8t_resource_partitioned_fixed10b",
       "num_cores": 4,
       "threads_per_core": 2,
       "flush_every_ticks": 0,
@@ -141,7 +141,7 @@
           "core": 0
         },
         {
-          "workload": "streamcluster",
+          "workload": "fluidanimate",
           "core": 0
         },
         {
@@ -149,19 +149,19 @@
           "core": 1
         },
         {
-          "workload": "canneal",
+          "workload": "dedup",
           "core": 1
         },
         {
-          "workload": "fluidanimate",
-          "core": 2
-        },
-        {
-          "workload": "dedup",
+          "workload": "streamcluster",
           "core": 2
         },
         {
           "workload": "freqmine",
+          "core": 2
+        },
+        {
+          "workload": "canneal",
           "core": 3
         },
         {
@@ -171,11 +171,11 @@
       ]
     },
     {
-      "name": "flush_smt_4c8t",
-      "policy": "flush_smt_4c8t_periodic_l1d",
+      "name": "flush_smt_4c8t_fixed10b",
+      "policy": "flush_smt_4c8t_periodic_l1d_fixed10b",
       "num_cores": 4,
       "threads_per_core": 2,
-      "flush_every_ticks": 2000000000,
+      "flush_every_ticks": 1000000000,
       "flush_scope": "active",
       "jobs": [
         {
@@ -183,7 +183,7 @@
           "core": 0
         },
         {
-          "workload": "streamcluster",
+          "workload": "fluidanimate",
           "core": 0
         },
         {
@@ -191,19 +191,19 @@
           "core": 1
         },
         {
-          "workload": "canneal",
+          "workload": "dedup",
           "core": 1
         },
         {
-          "workload": "fluidanimate",
-          "core": 2
-        },
-        {
-          "workload": "dedup",
+          "workload": "streamcluster",
           "core": 2
         },
         {
           "workload": "freqmine",
+          "core": 2
+        },
+        {
+          "workload": "canneal",
           "core": 3
         },
         {
