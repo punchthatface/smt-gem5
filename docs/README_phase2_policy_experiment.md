@@ -125,15 +125,3 @@ exit_cause = exiting with last active thread context
 no_smt/unrestricted_smt/constrained_smt: flush_count = 0
 flush_smt: flush_count > 0
 ```
-
-## Claim to make
-
-This is not SecSMT. The correct claim is:
-
-```text
-A gem5-based SMT policy framework that compares no-SMT isolation,
-unrestricted SMT sharing, constrained SMT resource policy, and periodic
-L1D cleanup across eight PARSEC workloads.
-```
-
-The L1D cleanup is real gem5 cache maintenance, but the project does not claim complete SMT side-channel protection. It studies the performance/cache-behavior tradeoff of one concrete cleanup mechanism and one constrained SMT resource policy.

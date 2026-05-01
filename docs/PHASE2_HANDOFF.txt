@@ -1,8 +1,6 @@
 Phase 2 handoff: final architecture-aware SMT experiment
 =========================================================
 
-Do not reduce final scope.
-
 Final target:
   4 cores, 2 SMT threads/core = 8 hardware contexts.
   8 unmodified PARSEC workloads.
